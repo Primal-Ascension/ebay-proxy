@@ -287,14 +287,11 @@ async function doBulk() {
         const top = results[0];
         const txt = `$${parseFloat(top.price).toFixed(2)} — ${(top.date||'').slice(0,10)}`;
 
-        // Push to Smartsheet
-        await fetch(`https://api.smartsheet.com/2.0/sheets/${SHEET_ID}/rows`, {
-          method: "PUT",
+        // Push to Smartsheet via proxy
+        await fetch("/push", {
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify([{ id: c.rowId, cells: [
-            { columnId: EBAY_COL, value: txt },
-            { columnId: DATE_COL, value: today },
-          ]}])
+          body: JSON.stringify({ rowId: c.rowId, saleText: txt, dateText: today })
         });
 
         logCount++;
