@@ -12,6 +12,8 @@ const CERT_ID = process.env.EBAY_CERT_ID;
 let cachedToken = null;
 let tokenExpiry = 0;
 
+const JUNK_KEYWORDS = ["lot", "bundle", "bulk", "collection", "random", "mystery", "pack", "box", "booster", "repack", "mixed"];
+
 async function getToken() {
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
   const credentials = Buffer.from(`${APP_ID}:${CERT_ID}`).toString("base64");
@@ -41,16 +43,15 @@ app.get("/sold", async (req, res) => {
     const token = await getToken();
     const searchQuery = grade ? `${q} ${grade}` : q;
 
-    // Browse API - search for recently sold/ended fixed price items
+    // Fetch more results so we have enough after filtering
     const params = new URLSearchParams({
       q: searchQuery,
-      limit: "5",
+      limit: "20",
       sort: "endingSoonest",
-      filter: "buyingOptions:{FIXED_PRICE},conditions:{USED|LIKE_NEW|VERY_GOOD|GOOD|ACCEPTABLE|FOR_PARTS_OR_NOT_WORKING}",
+      filter: "buyingOptions:{FIXED_PRICE}",
     });
 
     const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
-    console.log("Calling Browse API:", url);
 
     const browseRes = await fetch(url, {
       headers: {
@@ -61,7 +62,6 @@ app.get("/sold", async (req, res) => {
     });
 
     const raw = await browseRes.text();
-    console.log("Browse response:", raw.slice(0, 500));
 
     if (!browseRes.ok) {
       return res.status(500).json({ error: `Browse API error ${browseRes.status}`, raw: raw.slice(0, 500) });
@@ -70,7 +70,13 @@ app.get("/sold", async (req, res) => {
     const data = JSON.parse(raw);
     const items = data.itemSummaries || [];
 
-    const results = items.map(item => ({
+    // Filter out junk listings
+    const filtered = items.filter(item => {
+      const title = (item.title || "").toLowerCase();
+      return !JUNK_KEYWORDS.some(kw => title.includes(kw));
+    });
+
+    const results = filtered.slice(0, 5).map(item => ({
       title: item.title,
       price: item.price?.value,
       currency: item.price?.currency || "USD",
@@ -87,9 +93,9 @@ app.get("/sold", async (req, res) => {
   }
 });
 
-app.get("/", (req, res) => res.json({ 
-  status: "ok", 
-  service: "ebay-proxy", 
+app.get("/", (req, res) => res.json({
+  status: "ok",
+  service: "ebay-proxy",
   api: "Browse API v1",
   appId: APP_ID ? APP_ID.slice(0, 20) + "..." : "NOT SET",
   certSet: !!CERT_ID,
