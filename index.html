@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Card Data — Bulk Pricer</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #07070f; color: #ddd8cc; font-family: 'Courier New', monospace; min-height: 100vh; }
+header { background: linear-gradient(135deg,#0f0f1a,#1a0f0a); border-bottom: 1px solid #2a2a1a; padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 8px #4ade80; }
+.label { font-size: 10px; color: #f7c948; letter-spacing: .2em; text-transform: uppercase; }
+h1 { font-size: 20px; color: #fff; margin-top: 3px; }
+main { padding: 20px 24px; max-width: 760px; margin: 0 auto; }
+.card { background: #10101a; border: 1px solid #2a2a3a; border-radius: 8px; padding: 18px; margin-bottom: 18px; }
+.card-label { font-size: 10px; color: #f7c948; letter-spacing: .15em; text-transform: uppercase; margin-bottom: 12px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+input { background: #07070f; border: 1px solid #3a3a5a; border-radius: 6px; color: #ddd8cc; padding: 9px 12px; font-size: 13px; font-family: monospace; outline: none; flex: 1; min-width: 0; }
+input.short { max-width: 120px; }
+button { border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold; font-family: monospace; padding: 9px 20px; white-space: nowrap; }
+.btn-yellow { background: #0a0a0f; color: #f7c948; border: 1px solid #f7c948; }
+.btn-green { background: #0a0f0a; color: #4ade80; border: 1px solid #4ade80; }
+.btn-red { background: #1a0a0a; color: #ff6b6b; border: 1px solid #ff6b6b; }
+.result-row { display: flex; justify-content: space-between; padding: 7px 10px; border-radius: 4px; margin-bottom: 3px; gap: 10px; font-size: 12px; align-items: center; }
+.result-row:nth-child(odd) { background: #14141f; }
+.result-row:nth-child(even) { background: #0e0e18; }
+.result-row a { color: #a0a8c0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
+.price { color: #4ade80; font-weight: bold; white-space: nowrap; }
+.date { color: #555; white-space: nowrap; font-size: 11px; }
+.progress-bar { background: #1a1a2a; border-radius: 4px; height: 5px; margin-bottom: 14px; overflow: hidden; }
+.progress-fill { height: 100%; background: linear-gradient(90deg,#f7c948,#4ade80); transition: width 0.4s; }
+.log-item { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #1a1a2a; font-size: 12px; }
+.log-name { color: #c8c0b0; }
+.log-val { color: #4ade80; font-weight: bold; }
+.fail-item { font-size: 12px; color: #666; padding: 3px 0; }
+.log-card { background: #10101a; border: 1px solid #1a2a1a; border-radius: 8px; padding: 18px; margin-bottom: 12px; max-height: 320px; overflow-y: auto; }
+.fail-card { background: #100a0a; border: 1px solid #2a1a1a; border-radius: 8px; padding: 18px; max-height: 180px; overflow-y: auto; }
+.fail-label { font-size: 10px; color: #ff6b6b; letter-spacing: .15em; text-transform: uppercase; margin-bottom: 10px; }
+.success-label { font-size: 10px; color: #4ade80; letter-spacing: .15em; text-transform: uppercase; margin-bottom: 10px; }
+.status { font-size: 13px; color: #4ade80; margin-top: 8px; }
+.no-results { color: #666; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <div class="label">eBay · Railway Proxy Active</div>
+    <h1>Card Data — Bulk Pricer</h1>
+  </div>
+  <div class="dot"></div>
+</header>
+<main>
+
+  <!-- Single test -->
+  <div class="card">
+    <div class="card-label">Single Card Test</div>
+    <div class="row">
+      <input id="sq" placeholder="Card name + set" />
+      <input id="sg" placeholder="Grade" class="short" />
+      <button class="btn-yellow" onclick="doSingle()">Search</button>
+    </div>
+    <div id="single-results"></div>
+  </div>
+
+  <!-- Bulk -->
+  <div class="card">
+    <div class="card-label">Bulk Lookup — All <span id="total-count"></span> Cards → Smartsheet</div>
+    <div id="bulk-controls">
+      <button class="btn-green" onclick="doBulk()">▶ Start Bulk Lookup</button>
+    </div>
+    <div id="bulk-progress" style="display:none">
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
+        <span id="prog-count" style="color:#aaa">0 / 0</span>
+        <span id="prog-pct" style="color:#f7c948">0%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="prog-bar" style="width:0%"></div></div>
+      <button class="btn-red" onclick="stopBulk()">■ Stop</button>
+      <div id="bulk-status" class="status" style="display:none"></div>
+    </div>
+  </div>
+
+  <div id="log-section" style="display:none">
+    <div class="log-card">
+      <div class="success-label" id="log-label">✓ Updated (0)</div>
+      <div id="log-items"></div>
+    </div>
+  </div>
+
+  <div id="fail-section" style="display:none">
+    <div class="fail-card">
+      <div class="fail-label" id="fail-label">✗ No Results (0)</div>
+      <div id="fail-items"></div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+const PROXY = "https://ebay-proxy-production-20ff.up.railway.app";
+const SHEET_ID = "530728558219140";
+const EBAY_COL = 2051927646179204;
+const DATE_COL = 6555527273549700;
+
+const CARDS = [
+  { rowId: 5688175910387588, name: "Gengar Masaki Promo Japanese", grade: "" },
+  { rowId: 3436376096702340, name: "Dragonite Fossil Pokemon", grade: "PSA 9" },
+  { rowId: 7939975724072836, name: "Umbreon H30 Skyridge Pokemon", grade: "" },
+  { rowId: 7095550793940868, name: "Charizard GX Hidden Fates Shiny Vault", grade: "CGC 9" },
+  { rowId: 5125225956966276, name: "Charizard V Champions Path Secret", grade: "CGC 10" },
+  { rowId: 8221450700783492, name: "Umbreon ex Prismatic Evolutions", grade: "PSA 8" },
+  { rowId: 6251125863808900, name: "Shining Mew CoroCoro Promo Japanese", grade: "" },
+  { rowId: 1747526236438404, name: "Venusaur Base Set Shadowless", grade: "PSA 8" },
+  { rowId: 3999326050123652, name: "Charizard Base Set Unlimited", grade: "PSA 7" },
+  { rowId: 8502925677494148, name: "Mewtwo Gold Star Japanese", grade: "" },
+  { rowId: 340151352885124, name: "Kyogre Gold Star EX Delta Species", grade: "" },
+  { rowId: 4843750980255620, name: "Pokemon Base Set Booster Pack Unlimited", grade: "" },
+  { rowId: 2591951166570372, name: "Blastoise Base Set Shadowless", grade: "PSA 7" },
+  { rowId: 1466051259727748, name: "Celebi Gold Star EX Crystal Guardians", grade: "" },
+  { rowId: 5969650887098244, name: "Charizard GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 3717851073412996, name: "Blaine's Charizard Gym Challenge", grade: "" },
+  { rowId: 8221450700783492, name: "Rocket's Mewtwo Winner Best of Game", grade: "" },
+  { rowId: 903101306306436, name: "Charizard ex SV 151", grade: "" },
+  { rowId: 5406700933676932, name: "Sabrina's Gengar Gym Heroes", grade: "" },
+  { rowId: 3154901119991684, name: "Umbreon V Alt Art Evolving Skies", grade: "" },
+  { rowId: 7658500747362180, name: "Mewtwo Delta Species EX Delta Species", grade: "PSA 7" },
+  { rowId: 2029001213149060, name: "Alakazam Base Set Shadowless", grade: "" },
+  { rowId: 6532600840519556, name: "Umbreon GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 4280801026834308, name: "Rayquaza Delta Species EX Holon Phantoms", grade: "" },
+  { rowId: 691995073773444, name: "Latias Delta Species EX Holon Phantoms", grade: "" },
+  { rowId: 5195594701143940, name: "Ninetales Expedition Base Set", grade: "" },
+  { rowId: 2943794887458692, name: "Blaine's Moltres Gym Heroes", grade: "" },
+  { rowId: 7447394514829188, name: "M Rayquaza EX Roaring Skies", grade: "" },
+  { rowId: 1817894980616068, name: "Darkrai GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 4069694794301316, name: "Blaine's Arcanine Gym Challenge", grade: "" },
+  { rowId: 8573294421671812, name: "Greninja GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 410520097062788, name: "Rocket's Zapdos Gym Challenge", grade: "" },
+  { rowId: 4914119724433284, name: "Mew ex Scarlet Violet Promo", grade: "" },
+  { rowId: 2662319910748036, name: "Lt Surge's Bargain Mega Evolution", grade: "PSA 10" },
+  { rowId: 7165919538118532, name: "Bulbasaur SV 151", grade: "" },
+  { rowId: 1536420003905412, name: "Jessie James Hidden Fates Full Art", grade: "" },
+  { rowId: 6040019631275908, name: "Alakazam ex SV 151", grade: "" },
+  { rowId: 3788219817590660, name: "Mew POP Series 4", grade: "" },
+  { rowId: 8291819444961156, name: "Rocket's Scyther Gym Heroes", grade: "" },
+  { rowId: 973470050484100, name: "Charmeleon SV 151", grade: "" },
+  { rowId: 5477069677854596, name: "Greninja Star Sword Shield Promo SWSH144", grade: "PSA 9" },
+  { rowId: 3225269864169348, name: "Rocket's Moltres Gym Heroes", grade: "" },
+  { rowId: 7728869491539844, name: "Scizor GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 2099369957326724, name: "Lucario GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 6602969584697220, name: "Espeon Magma VS Aqua Two Ambitions", grade: "" },
+  { rowId: 4351169771011972, name: "Lt Surge's Raichu Gym Challenge", grade: "" },
+  { rowId: 8854769398382468, name: "Charmander Scarlet Violet Promo", grade: "" },
+  { rowId: 269782608707460, name: "Giovanni's Nidoking Gym Challenge", grade: "" },
+  { rowId: 4773382236077956, name: "Gengar 1st Edition Fossil", grade: "" },
+  { rowId: 2521582422392708, name: "Espeon EX Full Art BREAKpoint", grade: "" },
+  { rowId: 7025182049763204, name: "Psyduck SV 151", grade: "" },
+  { rowId: 1395682515550084, name: "Brock's Ninetales Gym Challenge", grade: "" },
+  { rowId: 5899282142920580, name: "Giovanni's Machamp Gym Challenge", grade: "" },
+  { rowId: 3647482329235332, name: "Wartortle SV 151", grade: "" },
+  { rowId: 8151081956605828, name: "Pikachu SNAP Promo WoTC", grade: "" },
+  { rowId: 832732562128772, name: "Gardevoir GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 5336332189499268, name: "Misty Gym Heroes", grade: "" },
+  { rowId: 3084532375814020, name: "Sabrina Gym Challenge", grade: "" },
+  { rowId: 7588132003184516, name: "Lanturn H15 Aquapolis", grade: "" },
+  { rowId: 1958632468971396, name: "Koga's Ditto Gym Challenge", grade: "" },
+  { rowId: 6462232096341892, name: "Moltres Zapdos Articuno GX Hidden Fates", grade: "" },
+  { rowId: 4210432282656644, name: "Leafeon GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 8714031910027140, name: "Sabrina's Alakazam Gym Challenge", grade: "" },
+  { rowId: 5054857212788612, name: "Typhlosion Delta Species EX Dragon Frontiers", grade: "" },
+  { rowId: 2803057399103364, name: "Ivysaur SV 151", grade: "" },
+  { rowId: 7306657026473860, name: "Rayquaza VMAX VSTAR Universe Japanese", grade: "CGC 10" },
+  { rowId: 1677157492260740, name: "Poliwhirl SV 151", grade: "" },
+  { rowId: 6180757119631236, name: "Radiant Charizard VSTAR Universe Japanese", grade: "CGC 10" },
+  { rowId: 3928957305945988, name: "Reshiram GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 8432556933316484, name: "Misty's Golduck Gym Challenge", grade: "" },
+  { rowId: 1114207538839428, name: "Mew VMAX VSTAR Universe Japanese", grade: "CGC 10" },
+  { rowId: 5617807166209924, name: "Rocket's Snorlax Gym Heroes", grade: "" },
+  { rowId: 3366007352524676, name: "Alolan Ninetales GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 7869606979895172, name: "Glaceon GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 2240107445682052, name: "Dragonair SV 151", grade: "" },
+  { rowId: 6743707073052548, name: "Eevee Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 4491907259367300, name: "Charizard ex SV 151", grade: "" },
+  { rowId: 8995506886737796, name: "Articuno GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 14695911063428, name: "Mewtwo Scarlet Violet Promo", grade: "" },
+  { rowId: 4518295538433924, name: "Giovanni's Persian Gym Challenge", grade: "" },
+  { rowId: 6770095352119172, name: "Mew ex SV 151", grade: "" },
+  { rowId: 1140595817906052, name: "Oricorio ex Mega Evolution Promos", grade: "CGC 10" },
+  { rowId: 5644195445276548, name: "Moltres Zapdos Articuno GX Secret Hidden Fates", grade: "" },
+  { rowId: 3392395631591300, name: "Rocket's Hitmonchan Gym Heroes", grade: "" },
+  { rowId: 7895995258961796, name: "Moltres Zapdos Articuno GX Full Art Hidden Fates", grade: "" },
+  { rowId: 577645864484740, name: "Giovanni Gym Challenge", grade: "" },
+  { rowId: 5081245491855236, name: "Erika's Clefable Gym Heroes", grade: "" },
+  { rowId: 2829445678169988, name: "Zygarde GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 7333045305540484, name: "Ho-oh Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 1703545771327364, name: "Lt Surge's Fearow Gym Heroes", grade: "" },
+  { rowId: 3955345585012612, name: "Charmander Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 8458945212383108, name: "Lt Surge's Electabuzz Gym Heroes", grade: "" },
+  { rowId: 296170887774084, name: "Mew ex SV 151", grade: "" },
+  { rowId: 4799770515144580, name: "Greninja Star Sword Shield Promo SWSH144", grade: "PSA 8" },
+  { rowId: 7051570328829828, name: "Erika Gym Heroes", grade: "" },
+  { rowId: 2547970701459332, name: "Koga Gym Challenge", grade: "" },
+  { rowId: 1422070794616708, name: "Blaine Gym Challenge", grade: "" },
+  { rowId: 5925670421987204, name: "Brock Gym Heroes", grade: "" },
+  { rowId: 3673870608301956, name: "Lt Surge Gym Heroes", grade: "" },
+  { rowId: 8177470235672452, name: "Misty's Tentacruel Gym Heroes", grade: "" },
+  { rowId: 859120841195396, name: "Wooper Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 5362720468565892, name: "Greninja Star Sword Shield Promo SWSH144", grade: "" },
+  { rowId: 3110920654880644, name: "Eevee ex Scarlet Violet Promo", grade: "" },
+  { rowId: 7614520282251140, name: "Team Rocket's Persian ex Glory of Team Rocket Japanese", grade: "CGC 10" },
+  { rowId: 1985020748038020, name: "Blastoise ex SV 151", grade: "" },
+  { rowId: 6488620375408516, name: "Rayquaza V VMAX Climax Japanese", grade: "CGC 10" },
+  { rowId: 4236820561723268, name: "Mew Old Maid Japanese", grade: "CGC 10" },
+  { rowId: 155433399418756, name: "Erika's Vileplume Gym Heroes", grade: "" },
+  { rowId: 2407233213104004, name: "Charizard ex Shiny Treasure ex Japanese", grade: "CGC 10" },
+  { rowId: 4659033026789252, name: "Brock's Rhydon Gym Heroes", grade: "" },
+  { rowId: 6910832840474500, name: "Mew ex Shiny Treasure ex Japanese", grade: "CGC 10" },
+  { rowId: 5784932933631876, name: "Machoke SV 151", grade: "" },
+  { rowId: 3533133119946628, name: "Koga's Beedrill Gym Challenge", grade: "" },
+  { rowId: 8036732747317124, name: "Altaria GX Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 718383352840068, name: "Lugia VSTAR Silver Tempest", grade: "PSA 9" },
+  { rowId: 5221982980210564, name: "Snorlax Scarlet Violet Promo", grade: "" },
+  { rowId: 2970183166525316, name: "Guzma Hidden Fates Shiny Vault", grade: "" },
+  { rowId: 7473782793895812, name: "The Rocket's Trap Gym Heroes", grade: "" },
+  { rowId: 1844283259682692, name: "Charmander Hidden Fates Shiny Vault", grade: "CGC 9" },
+  { rowId: 4096083073367940, name: "Lucario Hidden Fates Shiny Vault", grade: "" },
+];
+
+document.getElementById("total-count").textContent = CARDS.length;
+
+let aborted = false;
+let logCount = 0;
+let failCount = 0;
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function doSingle() {
+  const q = document.getElementById("sq").value.trim();
+  const g = document.getElementById("sg").value.trim();
+  if (!q) return;
+  const el = document.getElementById("single-results");
+  el.innerHTML = '<div class="no-results">Searching...</div>';
+  try {
+    const params = new URLSearchParams({ q });
+    if (g) params.append("grade", g);
+    const res = await fetch(`${PROXY}/sold?${params}`);
+    const data = await res.json();
+    const results = data.results || [];
+    if (!results.length) { el.innerHTML = '<div class="no-results">No results.</div>'; return; }
+    el.innerHTML = results.map((r, i) => `
+      <div class="result-row">
+        <a href="${r.url}" target="_blank">${(r.title||'').slice(0,60)}...</a>
+        <span class="price">$${parseFloat(r.price||0).toFixed(2)}</span>
+        <span class="date">${(r.date||'').slice(0,10)}</span>
+      </div>`).join('');
+  } catch(e) {
+    el.innerHTML = `<div class="no-results">Error: ${e.message}</div>`;
+  }
+}
+
+async function doBulk() {
+  aborted = false; logCount = 0; failCount = 0;
+  document.getElementById("bulk-controls").style.display = "none";
+  document.getElementById("bulk-progress").style.display = "block";
+  document.getElementById("log-section").style.display = "none";
+  document.getElementById("fail-section").style.display = "none";
+  document.getElementById("log-items").innerHTML = "";
+  document.getElementById("fail-items").innerHTML = "";
+  document.getElementById("bulk-status").style.display = "none";
+
+  const today = new Date().toISOString().slice(0,10);
+
+  for (let i = 0; i < CARDS.length; i++) {
+    if (aborted) break;
+    const c = CARDS[i];
+    const pct = Math.round(i / CARDS.length * 100);
+    document.getElementById("prog-bar").style.width = pct + "%";
+    document.getElementById("prog-pct").textContent = pct + "%";
+    document.getElementById("prog-count").textContent = `${i} / ${CARDS.length}`;
+
+    try {
+      const params = new URLSearchParams({ q: c.name });
+      if (c.grade) params.append("grade", c.grade);
+      const res = await fetch(`${PROXY}/sold?${params}`);
+      const data = await res.json();
+      const results = data.results || [];
+
+      if (results.length) {
+        const top = results[0];
+        const txt = `$${parseFloat(top.price).toFixed(2)} — ${(top.date||'').slice(0,10)}`;
+
+        // Push to Smartsheet
+        await fetch(`https://api.smartsheet.com/2.0/sheets/${SHEET_ID}/rows`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify([{ id: c.rowId, cells: [
+            { columnId: EBAY_COL, value: txt },
+            { columnId: DATE_COL, value: today },
+          ]}])
+        });
+
+        logCount++;
+        document.getElementById("log-label").textContent = `✓ Updated (${logCount})`;
+        document.getElementById("log-section").style.display = "block";
+        document.getElementById("log-items").innerHTML += `
+          <div class="log-item">
+            <span class="log-name">${c.name}${c.grade ? ' · '+c.grade : ''}</span>
+            <span class="log-val">${txt}</span>
+          </div>`;
+      } else {
+        failCount++;
+        document.getElementById("fail-label").textContent = `✗ No Results (${failCount})`;
+        document.getElementById("fail-section").style.display = "block";
+        document.getElementById("fail-items").innerHTML += `<div class="fail-item">${c.name}</div>`;
+      }
+    } catch(e) {
+      failCount++;
+      document.getElementById("fail-label").textContent = `✗ No Results (${failCount})`;
+      document.getElementById("fail-section").style.display = "block";
+      document.getElementById("fail-items").innerHTML += `<div class="fail-item">${c.name} — ${e.message}</div>`;
+    }
+
+    await sleep(700);
+  }
+
+  document.getElementById("prog-bar").style.width = "100%";
+  document.getElementById("prog-pct").textContent = "100%";
+  document.getElementById("prog-count").textContent = `${CARDS.length} / ${CARDS.length}`;
+  const stopBtn = document.querySelector(".btn-red");
+  if (stopBtn) stopBtn.style.display = "none";
+  const status = document.getElementById("bulk-status");
+  status.style.display = "block";
+  status.textContent = `✓ Complete — ${logCount} updated · ${failCount} no results`;
+}
+
+function stopBulk() { aborted = true; }
+</script>
+</body>
+</html>
