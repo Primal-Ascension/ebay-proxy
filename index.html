@@ -97,10 +97,6 @@ button { border: none; border-radius: 6px; cursor: pointer; font-size: 13px; fon
 
 <script>
 const PROXY = "https://ebay-proxy-production-20ff.up.railway.app";
-const SHEET_ID = "530728558219140";
-const EBAY_COL = 2051927646179204;
-const DATE_COL = 6555527273549700;
-
 const CARDS = [
   { rowId: 5688175910387588, name: "Gengar Masaki Promo Japanese", grade: "" },
   { rowId: 3436376096702340, name: "Dragonite Fossil Pokemon", grade: "PSA 9" },
@@ -268,6 +264,7 @@ async function doBulk() {
 
   const today = new Date().toISOString().slice(0,10);
 
+  const allResults = [];
   for (let i = 0; i < CARDS.length; i++) {
     if (aborted) break;
     const c = CARDS[i];
@@ -287,12 +284,8 @@ async function doBulk() {
         const top = results[0];
         const txt = `$${parseFloat(top.price).toFixed(2)} — ${(top.date||'').slice(0,10)}`;
 
-        // Push to Smartsheet via proxy
-        await fetch("/push", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rowId: c.rowId, saleText: txt, dateText: today })
-        });
+        // Store result for export
+        allResults.push({ rowId: c.rowId, name: c.name, grade: c.grade, saleText: txt, dateText: today });
 
         logCount++;
         document.getElementById("log-label").textContent = `✓ Updated (${logCount})`;
@@ -325,7 +318,33 @@ async function doBulk() {
   if (stopBtn) stopBtn.style.display = "none";
   const status = document.getElementById("bulk-status");
   status.style.display = "block";
-  status.textContent = `✓ Complete — ${logCount} updated · ${failCount} no results`;
+  status.textContent = `✓ Complete — ${logCount} found · ${failCount} no results`;
+
+  // Show copy button
+  const exportDiv = document.createElement('div');
+  exportDiv.style.cssText = 'margin-top:14px';
+  exportDiv.innerHTML = `
+    <button class="btn-yellow" onclick="copyResults()" style="width:100%">📋 Copy Results for Claude</button>
+    <div id="copy-confirm" style="color:#4ade80;font-size:12px;margin-top:8px;display:none">✓ Copied! Paste into Claude chat.</div>
+  `;
+  document.getElementById("bulk-progress").appendChild(exportDiv);
+  window._allResults = allResults;
+}
+
+function copyResults() {
+  const data = JSON.stringify(window._allResults || [], null, 2);
+  navigator.clipboard.writeText(data).then(() => {
+    document.getElementById('copy-confirm').style.display = 'block';
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = data;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    document.getElementById('copy-confirm').style.display = 'block';
+  });
 }
 
 function stopBulk() { aborted = true; }
