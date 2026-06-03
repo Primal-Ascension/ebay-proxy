@@ -38,66 +38,62 @@ app.get("/sold", async (req, res) => {
   if (!q) return res.status(400).json({ error: "Missing query param q" });
 
   try {
+    const token = await getToken();
     const searchQuery = grade ? `${q} ${grade}` : q;
 
-    // Finding API - findCompletedItems (true sold listings)
+    // Browse API - search for recently sold/ended fixed price items
     const params = new URLSearchParams({
-      "OPERATION-NAME": "findCompletedItems",
-      "SERVICE-VERSION": "1.0.0",
-      "SECURITY-APPNAME": APP_ID,
-      "RESPONSE-DATA-FORMAT": "JSON",
-      "keywords": searchQuery,
-      "itemFilter(0).name": "SoldItemsOnly",
-      "itemFilter(0).value": "true",
-      "itemFilter(1).name": "ListingType",
-      "itemFilter(1).value": "AuctionWithBIN",
-      "itemFilter(2).name": "ListingType",
-      "itemFilter(2).value(0)": "FixedPrice",
-      "itemFilter(2).value(1)": "Auction",
-      "sortOrder": "EndTimeSoonest",
-      "paginationInput.entriesPerPage": "5",
+      q: searchQuery,
+      limit: "5",
+      sort: "endingSoonest",
+      filter: "buyingOptions:{FIXED_PRICE},conditions:{USED|LIKE_NEW|VERY_GOOD|GOOD|ACCEPTABLE|FOR_PARTS_OR_NOT_WORKING}",
     });
 
-    const findingUrl = `https://svcs.ebay.com/services/search/FindingService/v1?${params}`;
-    console.log("Calling:", findingUrl);
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
+    console.log("Calling Browse API:", url);
 
-    const findRes = await fetch(findingUrl);
-    const raw = await findRes.text();
-    console.log("Raw response:", raw.slice(0, 500));
+    const browseRes = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        "Content-Type": "application/json",
+      },
+    });
 
-    let findData;
-    try {
-      findData = JSON.parse(raw);
-    } catch (e) {
-      return res.status(500).json({ error: "Failed to parse eBay response", raw: raw.slice(0, 300) });
+    const raw = await browseRes.text();
+    console.log("Browse response:", raw.slice(0, 500));
+
+    if (!browseRes.ok) {
+      return res.status(500).json({ error: `Browse API error ${browseRes.status}`, raw: raw.slice(0, 500) });
     }
 
-    const ack = findData?.findCompletedItemsResponse?.[0]?.ack?.[0];
-    const errorMsg = findData?.findCompletedItemsResponse?.[0]?.errorMessage;
-
-    if (ack !== "Success" && ack !== "Warning") {
-      return res.status(500).json({ error: "eBay API error", ack, errorMsg, raw: raw.slice(0, 500) });
-    }
-
-    const items = findData?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
+    const data = JSON.parse(raw);
+    const items = data.itemSummaries || [];
 
     const results = items.map(item => ({
-      title: item.title?.[0],
-      price: item.sellingStatus?.[0]?.currentPrice?.[0]?.__value__,
-      currency: item.sellingStatus?.[0]?.currentPrice?.[0]?.["@currencyId"],
-      date: item.listingInfo?.[0]?.endTime?.[0],
-      url: item.viewItemURL?.[0],
-      condition: item.condition?.[0]?.conditionDisplayName?.[0],
+      title: item.title,
+      price: item.price?.value,
+      currency: item.price?.currency || "USD",
+      date: item.itemEndDate || item.itemCreationDate || null,
+      url: item.itemWebUrl,
+      condition: item.condition,
+      image: item.image?.imageUrl,
     }));
 
-    res.json({ results, query: searchQuery, count: results.length });
+    res.json({ results, query: searchQuery, count: results.length, total: data.total || 0 });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
 
-app.get("/", (req, res) => res.json({ status: "ok", service: "ebay-proxy", appId: APP_ID?.slice(0, 15) + "..." }));
+app.get("/", (req, res) => res.json({ 
+  status: "ok", 
+  service: "ebay-proxy", 
+  api: "Browse API v1",
+  appId: APP_ID ? APP_ID.slice(0, 20) + "..." : "NOT SET",
+  certSet: !!CERT_ID,
+}));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`eBay proxy running on port ${PORT}`));
