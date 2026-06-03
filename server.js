@@ -1,6 +1,8 @@
+
 const express = require("express");
 const cors = require("cors");
 const fetch = require("node-fetch");
+const path = require("path");
 
 const app = express();
 app.use(cors());
@@ -12,23 +14,17 @@ const CERT_ID = process.env.EBAY_CERT_ID;
 let cachedToken = null;
 let tokenExpiry = 0;
 
-const JUNK_KEYWORDS = ["lot", "bundle", "bulk", "collection", "random", "mystery", "pack", "box", "booster", "repack", "mixed"];
+const JUNK = ["lot","bundle","bulk","collection","random","mystery","repack","mixed"];
 
 async function getToken() {
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
   const credentials = Buffer.from(`${APP_ID}:${CERT_ID}`).toString("base64");
   const res = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
     method: "POST",
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
+    headers: { Authorization: `Basic ${credentials}`, "Content-Type": "application/x-www-form-urlencoded" },
     body: "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope",
   });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Token error ${res.status}: ${err}`);
-  }
+  if (!res.ok) throw new Error(`Token error ${res.status}: ${await res.text()}`);
   const data = await res.json();
   cachedToken = data.access_token;
   tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
@@ -37,69 +33,35 @@ async function getToken() {
 
 app.get("/sold", async (req, res) => {
   const { q, grade } = req.query;
-  if (!q) return res.status(400).json({ error: "Missing query param q" });
-
+  if (!q) return res.status(400).json({ error: "Missing q" });
   try {
     const token = await getToken();
     const searchQuery = grade ? `${q} ${grade}` : q;
-
-    // Fetch more results so we have enough after filtering
-    const params = new URLSearchParams({
-      q: searchQuery,
-      limit: "20",
-      sort: "endingSoonest",
-      filter: "buyingOptions:{FIXED_PRICE}",
+    const params = new URLSearchParams({ q: searchQuery, limit: "20", sort: "endingSoonest", filter: "buyingOptions:{FIXED_PRICE}" });
+    const browseRes = await fetch(`https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`, {
+      headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
     });
-
-    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
-
-    const browseRes = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        "Content-Type": "application/json",
-      },
-    });
-
     const raw = await browseRes.text();
-
-    if (!browseRes.ok) {
-      return res.status(500).json({ error: `Browse API error ${browseRes.status}`, raw: raw.slice(0, 500) });
-    }
-
+    if (!browseRes.ok) return res.status(500).json({ error: `Browse API ${browseRes.status}`, raw: raw.slice(0,300) });
     const data = JSON.parse(raw);
-    const items = data.itemSummaries || [];
-
-    // Filter out junk listings
-    const filtered = items.filter(item => {
-      const title = (item.title || "").toLowerCase();
-      return !JUNK_KEYWORDS.some(kw => title.includes(kw));
-    });
-
-    const results = filtered.slice(0, 5).map(item => ({
+    const items = (data.itemSummaries || []).filter(item => !JUNK.some(k => (item.title||"").toLowerCase().includes(k)));
+    const results = items.slice(0, 5).map(item => ({
       title: item.title,
       price: item.price?.value,
       currency: item.price?.currency || "USD",
       date: item.itemEndDate || item.itemCreationDate || null,
       url: item.itemWebUrl,
       condition: item.condition,
-      image: item.image?.imageUrl,
     }));
-
-    res.json({ results, query: searchQuery, count: results.length, total: data.total || 0 });
+    res.json({ results, query: searchQuery, count: results.length });
   } catch (e) {
-    console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
 
-app.get("/", (req, res) => res.json({
-  status: "ok",
-  service: "ebay-proxy",
-  api: "Browse API v1",
-  appId: APP_ID ? APP_ID.slice(0, 20) + "..." : "NOT SET",
-  certSet: !!CERT_ID,
-}));
+app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
+
+app.get("/health", (req, res) => res.json({ status: "ok", api: "Browse API v1", appId: APP_ID?.slice(0,20)+"...", certSet: !!CERT_ID }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`eBay proxy running on port ${PORT}`));
