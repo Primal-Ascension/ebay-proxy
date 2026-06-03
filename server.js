@@ -9,7 +9,6 @@ app.use(express.json());
 
 const APP_ID = process.env.EBAY_APP_ID;
 const CERT_ID = process.env.EBAY_CERT_ID;
-const SMARTSHEET_TOKEN = process.env.SMARTSHEET_TOKEN;
 const SHEET_ID = "530728558219140";
 
 let cachedToken = null;
@@ -32,19 +31,77 @@ async function getToken() {
   return cachedToken;
 }
 
-// eBay search
+// Try Finding API (true sold listings) first, fall back to Browse API
 app.get("/sold", async (req, res) => {
   const { q, grade } = req.query;
   if (!q) return res.status(400).json({ error: "Missing q" });
+
+  const searchQuery = grade ? `${q} ${grade}` : q;
+
+  // --- Attempt 1: Finding API (sold listings) ---
   try {
-    const token = await getToken();
-    const searchQuery = grade ? `${q} ${grade}` : q;
-    const params = new URLSearchParams({ q: searchQuery, limit: "20", sort: "endingSoonest", filter: "buyingOptions:{FIXED_PRICE}" });
+    const params = new URLSearchParams({
+      "OPERATION-NAME": "findCompletedItems",
+      "SERVICE-VERSION": "1.0.0",
+      "SECURITY-APPNAME": APP_ID,
+      "RESPONSE-DATA-FORMAT": "JSON",
+      "keywords": searchQuery,
+      "itemFilter(0).name": "SoldItemsOnly",
+      "itemFilter(0).value": "true",
+      "sortOrder": "EndTimeSoonest",
+      "paginationInput.entriesPerPage": "10",
+    });
+
+    const findingUrl = `https://svcs.ebay.com/services/search/FindingService/v1?${params}`;
+    const findRes = await fetch(findingUrl);
+    const raw = await findRes.text();
+    const findData = JSON.parse(raw);
+
+    const ack = findData?.findCompletedItemsResponse?.[0]?.ack?.[0];
+    const errorMsg = findData?.findCompletedItemsResponse?.[0]?.errorMessage?.[0]?.error?.[0];
+
+    console.log(`Finding API ack: ${ack} | error: ${JSON.stringify(errorMsg)}`);
+
+    if (ack === "Success" || ack === "Warning") {
+      const items = findData?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
+      const filtered = items.filter(item => !JUNK.some(k => (item.title?.[0]||"").toLowerCase().includes(k)));
+      const results = filtered.slice(0, 5).map(item => ({
+        title: item.title?.[0],
+        price: item.sellingStatus?.[0]?.currentPrice?.[0]?.__value__,
+        currency: item.sellingStatus?.[0]?.currentPrice?.[0]?.["@currencyId"],
+        date: item.listingInfo?.[0]?.endTime?.[0],
+        url: item.viewItemURL?.[0],
+        condition: item.condition?.[0]?.conditionDisplayName?.[0],
+        source: "finding_api_sold",
+      }));
+      return res.json({ results, query: searchQuery, count: results.length, source: "finding_api" });
+    }
+
+    // Finding API failed — log why and fall through to Browse API
+    console.log(`Finding API failed (ack=${ack}), errorId=${errorMsg?.errorId?.[0]}, msg=${errorMsg?.message?.[0]} — falling back to Browse API`);
+
+  } catch (e) {
+    console.log(`Finding API exception: ${e.message} — falling back to Browse API`);
+  }
+
+  // --- Attempt 2: Browse API (active listings, sorted by price low→high as floor) ---
+  try {
+    await getToken();
+    const token = cachedToken;
+    const params = new URLSearchParams({
+      q: searchQuery,
+      limit: "20",
+      sort: "price",
+      filter: "buyingOptions:{FIXED_PRICE}",
+    });
+
     const browseRes = await fetch(`https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`, {
       headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
     });
+
     const raw = await browseRes.text();
     if (!browseRes.ok) return res.status(500).json({ error: `Browse API ${browseRes.status}`, raw: raw.slice(0,300) });
+
     const data = JSON.parse(raw);
     const items = (data.itemSummaries || []).filter(item => !JUNK.some(k => (item.title||"").toLowerCase().includes(k)));
     const results = items.slice(0, 5).map(item => ({
@@ -54,40 +111,49 @@ app.get("/sold", async (req, res) => {
       date: item.itemEndDate || item.itemCreationDate || null,
       url: item.itemWebUrl,
       condition: item.condition,
+      source: "browse_api_active",
     }));
-    res.json({ results, query: searchQuery, count: results.length });
+
+    return res.json({ results, query: searchQuery, count: results.length, source: "browse_api_fallback" });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 });
 
-// Smartsheet push — server-side to avoid CORS
-app.post("/push", async (req, res) => {
-  const { rowId, saleText, dateText } = req.body;
-  if (!rowId || !saleText) return res.status(400).json({ error: "Missing rowId or saleText" });
-  if (!SMARTSHEET_TOKEN) return res.status(500).json({ error: "SMARTSHEET_TOKEN not set" });
+// Diagnostic endpoint — test Finding API directly and return full response
+app.get("/test-finding", async (req, res) => {
+  const q = req.query.q || "Charizard Base Set Pokemon";
+  const params = new URLSearchParams({
+    "OPERATION-NAME": "findCompletedItems",
+    "SERVICE-VERSION": "1.0.0",
+    "SECURITY-APPNAME": APP_ID,
+    "RESPONSE-DATA-FORMAT": "JSON",
+    "keywords": q,
+    "itemFilter(0).name": "SoldItemsOnly",
+    "itemFilter(0).value": "true",
+    "sortOrder": "EndTimeSoonest",
+    "paginationInput.entriesPerPage": "3",
+  });
   try {
-    const ssRes = await fetch(`https://api.smartsheet.com/2.0/sheets/${SHEET_ID}/rows`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${SMARTSHEET_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify([{ id: rowId, cells: [
-        { columnId: 2051927646179204, value: saleText },
-        { columnId: 6555527273549700, value: dateText },
-      ]}]),
+    const findRes = await fetch(`https://svcs.ebay.com/services/search/FindingService/v1?${params}`);
+    const raw = await findRes.text();
+    const data = JSON.parse(raw);
+    const ack = data?.findCompletedItemsResponse?.[0]?.ack?.[0];
+    const errorMsg = data?.findCompletedItemsResponse?.[0]?.errorMessage;
+    const items = data?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
+    res.json({
+      ack,
+      errorMsg,
+      itemCount: items.length,
+      firstItem: items[0] ? { title: items[0].title?.[0], price: items[0].sellingStatus?.[0]?.currentPrice?.[0]?.__value__, date: items[0].listingInfo?.[0]?.endTime?.[0] } : null,
     });
-    const data = await ssRes.json();
-    if (!ssRes.ok) return res.status(500).json({ error: "Smartsheet error", data });
-    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
-app.get("/health", (req, res) => res.json({ status: "ok", api: "Browse API v1", appId: APP_ID?.slice(0,20)+"...", certSet: !!CERT_ID, smartsheetSet: !!SMARTSHEET_TOKEN }));
+app.get("/health", (req, res) => res.json({ status: "ok", api: "Finding+Browse hybrid", appId: APP_ID?.slice(0,20)+"...", certSet: !!CERT_ID }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`eBay proxy running on port ${PORT}`));
