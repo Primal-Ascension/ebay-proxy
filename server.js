@@ -146,6 +146,7 @@ app.get("/test-finding", async (req, res) => {
       errorMsg,
       itemCount: items.length,
       firstItem: items[0] ? { title: items[0].title?.[0], price: items[0].sellingStatus?.[0]?.currentPrice?.[0]?.__value__, date: items[0].listingInfo?.[0]?.endTime?.[0] } : null,
+      rawSlice: raw.slice(0, 800),
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
