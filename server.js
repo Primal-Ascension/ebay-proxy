@@ -19,7 +19,9 @@ app.get("/lookup", async (req, res) => {
   if (!q) return res.status(400).json({ error: "Missing q" });
 
   try {
-    const params = new URLSearchParams({ search: q, market: "US", limit: "5" });
+    // Clean the query — remove card numbers and special chars that confuse PokeTrace
+    const cleanQ = q.replace(/[#\/\d]+$/, '').replace(/\s+/g, ' ').trim();
+    const params = new URLSearchParams({ search: cleanQ, market: "US", limit: "5" });
     if (set) params.append("set", set);
 
     const ptRes = await fetch(`https://api.poketrace.com/v1/cards?${params}`, {
